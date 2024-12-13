@@ -1,37 +1,50 @@
 package main
 
 import (
-	"fmt"
-	"io"
+	"context"
+	"log"
+	"main-mode/handlers"
 	"net/http"
+	"os"
+	"os/signal"
+	"time"
 )
 
 func main() {
-	// Устанавливаем обработчик для корневого пути "/"
-	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
-		// Выводим в консоль сообщение "hello"
-		fmt.Println("hello")
+	l := log.New(os.Stdout, "product-api", log.LstdFlags)
 
-		// Читаем тело запроса
-		d, err := io.ReadAll(r.Body) // d - данные
+	hh := handlers.NewHello(l)
+	gh := handlers.NewGoodbye(l)
 
-		// Если произошла ошибка при чтении тела запроса
+	// Мультиплексер
+	sm := http.NewServeMux()
+	sm.Handle("/", hh)
+	sm.Handle("/goodbye", gh)
+
+	// Конфик сервера
+	s := http.Server{
+		Addr:         ":9090",
+		Handler:      sm,
+		IdleTimeout:  time.Second * 120,
+		ReadTimeout:  time.Second * 1,
+		WriteTimeout: time.Second * 1,
+	}
+
+	go func() {
+		// Запускаем сервер на порту 8080
+		err := s.ListenAndServe()
 		if err != nil {
-			// Возвращаем ошибку "Bad Request" клиенту
-			http.Error(rw, "It was error :(", http.StatusBadRequest)
-			return
+			l.Fatal(err)
 		}
+	}()
 
-		// Отправляем ответ клиенту с полученными данными
-		fmt.Fprintf(rw, "Hello: %v\n", string(d))
-	})
+	sigChan := make(chan os.Signal, 1) // Создание каналана
+	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Kill)
 
-	// Устанавливаем обработчик для пути "/goodbye"
-	http.HandleFunc("/goodbye", func(http.ResponseWriter, *http.Request) {
-		// Выводим в консоль сообщение "Goodbye"
-		fmt.Println("Goodbye")
-	})
+	sig := <-sigChan
+	l.Println("Получено завершение, корректное завершение работы", sig)
 
-	// Запускаем сервер на порту 8080
-	http.ListenAndServe(":8080", nil)
+	tc, _ := context.WithTimeout(context.Background(), 30*time.Second)
+	s.Shutdown(tc)
 }
